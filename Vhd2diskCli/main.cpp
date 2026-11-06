@@ -19,7 +19,7 @@
 #define VT_CYAN			L"\x1b[96m"
 #define VT_TITLE		L"\x1b[1;96m"
 #define VT_HEADER		L"\x1b[1;36m"
-#define VT_BADGE_OK		L"\x1b[1;30;42m"
+#define VT_BADGE_OK		L"\x1b[1;97;42m"
 #define VT_BADGE_WARN	L"\x1b[1;97;43m"
 #define VT_BADGE_ERROR	L"\x1b[1;97;41m"
 #define VT_CLEAR_EOL	L"\x1b[K"
