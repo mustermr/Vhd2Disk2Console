@@ -50,33 +50,25 @@ void PopulateVolumeList(HWND hDlg, VHD_PARTITION_ROW* pRows, int nRows)
 
 	for(int i = 0; i < nRows; i++)
 	{
+		// Same order as the columns added in AddListHeader
+		LPWSTR fields[] = { pRows[i].sNumber, pRows[i].sKind, pRows[i].sBoot, pRows[i].sType
+			, pRows[i].sStart, pRows[i].sSize, pRows[i].sName };
+
 		LVITEM item;
 		item.mask = LVIF_TEXT;
 		item.iItem = i;
 
-		item.iSubItem = 0;
-		item.pszText = pRows[i].sBoot;
-		ListView_InsertItem(hwdListCtrl, &item);
+		for(int f = 0; f < ARRAYSIZE(fields); f++)
+		{
+			item.iSubItem = f;
+			item.pszText = fields[f];
+			item.cchTextMax = (int)wcslen(item.pszText) + 1;
 
-		item.iSubItem = 1;
-		item.pszText = pRows[i].sType;
-		item.cchTextMax = wcslen(item.pszText) + 1;
-		ListView_SetItem(hwdListCtrl, &item);
-
-		item.iSubItem = 2;
-		item.pszText = pRows[i].sSize;
-		item.cchTextMax = wcslen(item.pszText) + 1;
-		ListView_SetItem(hwdListCtrl, &item);
-
-		item.iSubItem = 3;
-		item.pszText = pRows[i].sChsFirst;
-		item.cchTextMax = wcslen(item.pszText) + 1;
-		ListView_SetItem(hwdListCtrl, &item);
-
-		item.iSubItem = 4;
-		item.pszText = pRows[i].sChsLast;
-		item.cchTextMax = wcslen(item.pszText) + 1;
-		ListView_SetItem(hwdListCtrl, &item);
+			if(f == 0)
+				ListView_InsertItem(hwdListCtrl, &item);
+			else
+				ListView_SetItem(hwdListCtrl, &item);
+		}
 	}
 }
 
@@ -145,43 +137,37 @@ void PopulatePhysicalDriveComboBox(HWND hDlg)
 
 void AddListHeader(HWND hDlg)
 {
+	static const struct
+	{
+		LPCWSTR sText;
+		int cx;
+	} columns[] =
+	{
+		{ L"#", 30 },
+		{ L"Kind", 55 },
+		{ L"Boot", 35 },
+		{ L"Type", 110 },
+		{ L"Start LBA", 70 },
+		{ L"Size", 60 },
+		{ L"Name", 90 },
+	};
+
 	LVCOLUMN col;
 
 	HWND hListCtrl = GetDlgItem(hDlg, IDC_LIST_VOLUME);
 	if(!hListCtrl) return;
 
-	ListView_SetExtendedListViewStyle 
+	ListView_SetExtendedListViewStyle
 		(hListCtrl, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP);
 
-	col.mask = LVCF_TEXT | LVCF_WIDTH;
-	col.pszText = L"Boot";
-	col.fmt = LVCFMT_LEFT;
-	col.cx = 40;
-	ListView_InsertColumn(hListCtrl, 0, &col);
-
-	col.mask = LVCF_TEXT | LVCF_WIDTH;
-	col.pszText = L"Type";
-	col.fmt = LVCFMT_LEFT;
-	col.cx = 40;
-	ListView_InsertColumn(hListCtrl, 1, &col);
-
-	col.mask = LVCF_TEXT | LVCF_WIDTH;
-	col.pszText = L"Size (in sectors)";
-	col.fmt = LVCFMT_LEFT;
-	col.cx = 90;
-	ListView_InsertColumn(hListCtrl, 2, &col);
-
-	col.mask = LVCF_TEXT | LVCF_WIDTH;
-	col.pszText = L"C.H.S. first sector";
-	col.fmt = LVCFMT_LEFT;
-	col.cx = 100;
-	ListView_InsertColumn(hListCtrl, 3, &col);
-
-	col.mask = LVCF_TEXT | LVCF_WIDTH;
-	col.pszText = L"C.H.S. last sector";
-	col.fmt = LVCFMT_LEFT;
-	col.cx = 100;
-	ListView_InsertColumn(hListCtrl, 4, &col);
+	for(int i = 0; i < ARRAYSIZE(columns); i++)
+	{
+		col.mask = LVCF_TEXT | LVCF_WIDTH;
+		col.pszText = const_cast<LPWSTR>(columns[i].sText);
+		col.fmt = LVCFMT_LEFT;
+		col.cx = columns[i].cx;
+		ListView_InsertColumn(hListCtrl, i, &col);
+	}
 }
 
 int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd )
@@ -260,7 +246,7 @@ LRESULT CALLBACK MainDlgProc( HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam 
 		case IDC_BUTTON_BROWSE_VHD:
 			if (DoFileDialog(sVhdPath, L"VHD Files (*.vhd)\0*.vhd\0All Files (*.*)\0*.*\0", L"vhd") == IDOK)
 			{
-				VHD_PARTITION_ROW rows[4];
+				static VHD_PARTITION_ROW rows[VHD_MAX_PARTITIONS];
 				int nRows = 0;
 
 				SetDlgItemText(hDlg, IDC_EDIT_VHD_FILE, sVhdPath);
@@ -271,7 +257,7 @@ LRESULT CALLBACK MainDlgProc( HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam 
 				ListView_DeleteAllItems(GetDlgItem(hDlg, IDC_LIST_VOLUME));
 
 				pVhd2disk = new CVhdToDisk(sVhdPath);
-				if(pVhd2disk && pVhd2disk->ParseFirstSector(rows, 4, &nRows))
+				if(pVhd2disk && pVhd2disk->ParsePartitions(rows, ARRAYSIZE(rows), &nRows, NULL))
 					PopulateVolumeList(hDlg, rows, nRows);
 			}
 			return TRUE;

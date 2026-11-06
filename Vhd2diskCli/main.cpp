@@ -89,27 +89,36 @@ BOOL NormalizeDrivePath(LPCWSTR sArg, WCHAR* sDrive, size_t nDriveChars)
 
 void PrintPartitionTable(CVhdToDisk& vhd)
 {
-	VHD_PARTITION_ROW rows[4];
+	static VHD_PARTITION_ROW rows[VHD_MAX_PARTITIONS];
 	int nRows = 0;
+	LPCWSTR sScheme = NULL;
+	WCHAR sDiskSize[16] = {0};
 
-	if(!vhd.ParseFirstSector(rows, 4, &nRows))
+	CVhdToDisk::FormatSize(vhd.GetDiskSize(), sDiskSize, ARRAYSIZE(sDiskSize));
+
+	if(!vhd.ParsePartitions(rows, ARRAYSIZE(rows), &nRows, &sScheme))
 	{
 		wprintf(L"Could not read the partition table from the VHD.\n");
 		return;
 	}
 
+	wprintf(L"\nVHD disk size: %s (%llu sectors), partition table: %s\n"
+		, sDiskSize, vhd.GetDiskSize() / 512, sScheme);
+
 	if(nRows == 0)
 	{
-		wprintf(L"No partitions found in the VHD's first sector.\n");
+		wprintf(L"No partitions found in the VHD.\n");
 		return;
 	}
 
 	wprintf(L"\nPartitions found in the VHD:\n");
-	wprintf(L"%-5s %-8s %-12s %-20s %-20s\n", L"Boot", L"Type", L"Size", L"CHS first sector", L"CHS last sector");
+	wprintf(L"%-3s %-9s %-5s %-22s %-12s %-12s %-10s %s\n"
+		, L"#", L"Kind", L"Boot", L"Type", L"Start LBA", L"Sectors", L"Size", L"Name");
 	for(int i = 0; i < nRows; i++)
 	{
-		wprintf(L"%-5s %-8s %-12s %-20s %-20s\n"
-			, rows[i].sBoot, rows[i].sType, rows[i].sSize, rows[i].sChsFirst, rows[i].sChsLast);
+		wprintf(L"%-3s %-9s %-5s %-22s %-12s %-12s %-10s %s\n"
+			, rows[i].sNumber, rows[i].sKind, rows[i].sBoot, rows[i].sType
+			, rows[i].sStart, rows[i].sSectors, rows[i].sSize, rows[i].sName);
 	}
 }
 

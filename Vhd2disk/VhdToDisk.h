@@ -56,13 +56,18 @@ typedef struct
 } VHD_DYNAMIC;
 
 
+#define VHD_MAX_PARTITIONS 128
+
 typedef struct
 {
+	WCHAR sNumber[8];	// partition number as Linux numbers it (sdaN)
+	WCHAR sKind[12];	// Primary, Extended, Logical or GPT
 	WCHAR sBoot[4];
-	WCHAR sType[16];
-	WCHAR sSize[16];
-	WCHAR sChsFirst[32];
-	WCHAR sChsLast[32];
+	WCHAR sType[40];
+	WCHAR sStart[24];	// first LBA
+	WCHAR sSectors[24];
+	WCHAR sSize[16];	// human readable
+	WCHAR sName[40];	// GPT partition name
 } VHD_PARTITION_ROW;
 
 
@@ -82,7 +87,14 @@ public:
 	BOOL DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress);
 
 
-	BOOL ParseFirstSector(VHD_PARTITION_ROW* pRows, int nMaxRows, int* pnRows);
+	// Lists MBR primary, extended and logical partitions, or the GPT entries
+	// when the MBR is protective. *psScheme gets L"MBR", L"GPT" or L"none".
+	BOOL ParsePartitions(VHD_PARTITION_ROW* pRows, int nMaxRows, int* pnRows, LPCWSTR* psScheme);
+
+	// Virtual disk size in bytes, from the VHD footer.
+	UINT64 GetDiskSize();
+
+	static void FormatSize(UINT64 nBytes, WCHAR* sSize, size_t nSizeChars);
 
 protected:
 
@@ -97,6 +109,15 @@ protected:
 
 
 	UINT64 GetFirstSectorAddress();
+
+	BOOL ReadBat(UINT32** ppBat, UINT32* pnBats);
+	BOOL ReadVhdSector(const UINT32* pBat, UINT32 nBats, UINT64 nLba, BYTE* pSector);
+
+	void AddMbrRow(VHD_PARTITION_ROW* pRow, int nNumber, LPCWSTR sKind, const BYTE* pEntry, UINT64 nStart);
+	BOOL ParseLogicalPartitions(const UINT32* pBat, UINT32 nBats, UINT64 nExtStart
+		, VHD_PARTITION_ROW* pRows, int nMaxRows, int* pnItem);
+	BOOL ParseGpt(const UINT32* pBat, UINT32 nBats
+		, VHD_PARTITION_ROW* pRows, int nMaxRows, int* pnItem);
 
 	BOOL Dump(IVhdDumpProgress* pProgress);
 };
