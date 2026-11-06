@@ -20,6 +20,9 @@
     <ClCompile Include="..\Vhd2disk\VhdToDisk.cpp">
       <Filter>Shared Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Vhd2disk\DiskPrep.cpp">
+      <Filter>Shared Core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
@@ -32,6 +35,9 @@
       <Filter>Shared Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Vhd2disk\VhdToDisk.h">
+      <Filter>Shared Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Vhd2disk\DiskPrep.h">
       <Filter>Shared Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Vhd2disk\Trace.h">

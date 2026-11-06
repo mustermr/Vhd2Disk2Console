@@ -84,7 +84,8 @@ public:
 	CVhdToDisk(LPWSTR sPath);
 	~CVhdToDisk(void);
 
-	BOOL DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress);
+	// bPrepareDisk: dismount, clean and offline the target first (see DiskPrep.h)
+	BOOL DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress, BOOL bPrepareDisk = TRUE);
 
 
 	// Lists MBR primary, extended and logical partitions, or the GPT entries

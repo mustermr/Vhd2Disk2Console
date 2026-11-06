@@ -5,24 +5,51 @@
 #include "../Vhd2disk/VhdDumpProgress.h"
 #include "../Vhd2disk/VhdToDisk.h"
 
+// Block progress is one line redrawn in place with \r; status and error
+// messages first finish that line so they don't overwrite it.
 class CConsoleProgress : public IVhdDumpProgress
 {
+	BOOL m_bProgressLine;
+	ULONGLONG m_nLastDraw;
+	UINT32 m_nLastCurrent;
+
 public:
+	CConsoleProgress() : m_bProgressLine(FALSE), m_nLastDraw(0), m_nLastCurrent(0) {}
+
+	void EndProgressLine()
+	{
+		if(!m_bProgressLine) return;
+
+		wprintf(L"\n");
+		m_bProgressLine = FALSE;
+	}
+
 	void OnStatus(LPCWSTR sStatus)
 	{
-		wprintf(L"\n%s\n", sStatus);
+		EndProgressLine();
+		wprintf(L"%s\n", sStatus);
 	}
 
 	void OnProgress(UINT32 nCurrent, UINT32 nTotal)
 	{
 		if(nTotal == 0) return;
-		wprintf(L"\rWriting block %u/%u (%u%%)", nCurrent, nTotal, (nCurrent * 100) / nTotal);
+
+		// Redraw at most 5 times a second, but always show the first and last update
+		ULONGLONG nNow = GetTickCount64();
+		if(m_bProgressLine && (nCurrent == m_nLastCurrent || (nCurrent < nTotal && nNow - m_nLastDraw < 200))) return;
+		m_nLastDraw = nNow;
+		m_nLastCurrent = nCurrent;
+
+		wprintf(L"\rWriting block %u/%u (%u%%)", nCurrent, nTotal, (UINT32)((UINT64)nCurrent * 100 / nTotal));
 		fflush(stdout);
+		m_bProgressLine = TRUE;
 	}
 
 	void OnDriveWriteError(LPCWSTR sMessage)
 	{
-		fwprintf(stderr, L"\n%s\n", sMessage);
+		EndProgressLine();
+		fflush(stdout);
+		fwprintf(stderr, L"%s\n", sMessage);
 	}
 };
 
@@ -32,9 +59,12 @@ void PrintUsage()
 	wprintf(L"Usage:\n");
 	wprintf(L"  Vhd2diskCli.exe -l | --list\n");
 	wprintf(L"      List available physical drives.\n\n");
-	wprintf(L"  Vhd2diskCli.exe <vhd-path> <PhysicalDriveN | \\\\.\\PhysicalDriveN> [-y | --yes]\n");
-	wprintf(L"      Dump the VHD onto the given physical drive.\n");
-	wprintf(L"      -y, --yes   Skip the confirmation prompt.\n");
+	wprintf(L"  Vhd2diskCli.exe <vhd-path> <N | PhysicalDriveN | \\\\.\\PhysicalDriveN> [-y | --yes] [--no-prepare]\n");
+	wprintf(L"      Dump the VHD onto the given physical drive. Before writing, the drive's\n");
+	wprintf(L"      volumes are dismounted, its partition table is deleted and it is taken\n");
+	wprintf(L"      offline until reboot (like diskpart CLEAN and OFFLINE DISK).\n");
+	wprintf(L"      -y, --yes       Skip the confirmation prompt.\n");
+	wprintf(L"      --no-prepare    Don't clean or offline the drive; write to it as it is.\n");
 }
 
 void ListPhysicalDrives()
@@ -125,6 +155,7 @@ void PrintPartitionTable(CVhdToDisk& vhd)
 int wmain(int argc, wchar_t* argv[])
 {
 	BOOL bAssumeYes = FALSE;
+	BOOL bPrepareDisk = TRUE;
 	LPCWSTR sVhdPath = NULL;
 	LPCWSTR sDriveArg = NULL;
 
@@ -138,6 +169,10 @@ int wmain(int argc, wchar_t* argv[])
 		else if(wcscmp(argv[i], L"-y") == 0 || wcscmp(argv[i], L"--yes") == 0)
 		{
 			bAssumeYes = TRUE;
+		}
+		else if(wcscmp(argv[i], L"--no-prepare") == 0)
+		{
+			bPrepareDisk = FALSE;
 		}
 		else if(!sVhdPath)
 		{
@@ -155,7 +190,7 @@ int wmain(int argc, wchar_t* argv[])
 		return 1;
 	}
 
-	WCHAR sDrive[64] = {0};
+	WCHAR sDrive[MAX_PATH] = {0};
 	NormalizeDrivePath(sDriveArg, sDrive, ARRAYSIZE(sDrive));
 
 	CVhdToDisk vhd(const_cast<LPWSTR>(sVhdPath));
@@ -176,9 +211,9 @@ int wmain(int argc, wchar_t* argv[])
 	}
 
 	CConsoleProgress progress;
-	BOOL bResult = vhd.DumpVhdToDisk(const_cast<LPWSTR>(sVhdPath), sDrive, &progress);
+	BOOL bResult = vhd.DumpVhdToDisk(const_cast<LPWSTR>(sVhdPath), sDrive, &progress, bPrepareDisk);
 
-	wprintf(L"\n");
+	progress.EndProgressLine();
 	if(bResult)
 	{
 		wprintf(L"VHD dumped on drive successfully!\n");

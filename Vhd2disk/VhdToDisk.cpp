@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "Trace.h"
 #include "VhdToDisk.h"
+#include "DiskPrep.h"
 
 #include <stdio.h>
 
@@ -101,7 +102,13 @@ BOOL CVhdToDisk::ReadFooter()
 	BOOL bReturn = FALSE;
 	DWORD dwByteRead = 0;
 
+	LARGE_INTEGER filepointer;
+	filepointer.QuadPart = 0;
+
 	if(m_hVhdFile == INVALID_HANDLE_VALUE) return FALSE;
+
+	// Dynamic VHDs keep a copy of the footer at the start of the file
+	SetFilePointerEx(m_hVhdFile, filepointer, NULL, FILE_BEGIN);
 
 	bReturn = ReadFile(m_hVhdFile, &m_Foot, sizeof(VHD_FOOTER), &dwByteRead, 0);
 
@@ -493,15 +500,8 @@ BOOL CVhdToDisk::Dump(IVhdDumpProgress* pProgress)
 
 	for(UINT32 b = 0; b < bats; b++)
 	{
-		if((b + 1) % 100 == 0)
-		{
-			WCHAR sText[256] = {0};
-			wsprintf(sText, L"dumping blocks... %d/%d", b + 1, bats);
-
-			pProgress->OnStatus(sText);
+		if((b + 1) % 10 == 0)
 			pProgress->OnProgress(b + 1, bats);
-
-		}
 
 		
 		if(_byteswap_ulong(bat[b]) == 0xFFFFFFFF)
@@ -588,6 +588,8 @@ BOOL CVhdToDisk::Dump(IVhdDumpProgress* pProgress)
 		*/
 	}
 
+	pProgress->OnProgress(bats, bats);
+
 clean:
 
 	if(bitmap) delete[] bitmap;
@@ -597,7 +599,7 @@ clean:
 	return bReturn;
 }
 
-BOOL CVhdToDisk::DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress)
+BOOL CVhdToDisk::DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress, BOOL bPrepareDisk)
 {
 	BOOL bReturn = FALSE;
 
@@ -611,15 +613,6 @@ BOOL CVhdToDisk::DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDump
 		}
 	}
 	
-	bReturn = OpenPhysicalDrive(sDrive);
-	if(!bReturn)
-	{
-		TRACE("Failed to open physical drive: %S\n", sDrive);
-		CloseVhdFile();
-		goto exit;
-	}
-	
-
 	bReturn = ReadFooter();
 	if(!bReturn)
 	{
@@ -631,6 +624,25 @@ BOOL CVhdToDisk::DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDump
 	if(!bReturn)
 	{
 		TRACE("Failed to read dynamic header\n");
+		goto clean;
+	}
+
+	if(bPrepareDisk)
+	{
+		bReturn = PrepareTargetDisk(sDrive, sPath, GetDiskSize(), pProgress);
+		if(!bReturn)
+		{
+			TRACE("Failed to prepare physical drive: %S\n", sDrive);
+			goto clean;
+		}
+	}
+
+	bReturn = OpenPhysicalDrive(sDrive);
+	if(!bReturn)
+	{
+		WCHAR sMessage[256] = {0};
+		swprintf_s(sMessage, L"Can't open %s for writing (error %u).", sDrive, GetLastError());
+		pProgress->OnDriveWriteError(sMessage);
 		goto clean;
 	}
 

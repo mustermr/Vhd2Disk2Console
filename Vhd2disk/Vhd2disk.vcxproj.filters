@@ -24,6 +24,9 @@
     <ClCompile Include="Vhd2disk.cpp">
       <Filter>Source files</Filter>
     </ClCompile>
+    <ClCompile Include="DiskPrep.cpp">
+      <Filter>Source files</Filter>
+    </ClCompile>
     <ClCompile Include="VhdToDisk.cpp">
       <Filter>Source files</Filter>
     </ClCompile>
@@ -48,6 +51,9 @@
       <Filter>Header files</Filter>
     </ClInclude>
     <ClInclude Include="VhdDumpProgress.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiskPrep.h">
       <Filter>Header files</Filter>
     </ClInclude>
     <ClInclude Include="VhdToDisk.h">

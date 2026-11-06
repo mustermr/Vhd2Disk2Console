@@ -8,11 +8,11 @@
 // Modifiez les définitions suivantes si vous devez cibler une plateforme avant celles spécifiées ci-dessous.
 // Reportez-vous à MSDN pour obtenir les dernières informations sur les valeurs correspondantes pour les différentes plateformes.
 #ifndef WINVER                          // Spécifie que la plateforme minimale requise est Windows Vista.
-#define WINVER 0x0600           // Attribuez la valeur appropriée à cet élément pour cibler d'autres versions de Windows.
+#define WINVER 0x0601           // Attribuez la valeur appropriée à cet élément pour cibler d'autres versions de Windows.
 #endif
 
 #ifndef _WIN32_WINNT            // Spécifie que la plateforme minimale requise est Windows Vista.
-#define _WIN32_WINNT 0x0600     // Attribuez la valeur appropriée à cet élément pour cibler d'autres versions de Windows.
+#define _WIN32_WINNT 0x0601     // Attribuez la valeur appropriée à cet élément pour cibler d'autres versions de Windows.
 #endif
 
 #ifndef _WIN32_WINDOWS          // Spécifie que la plateforme minimale requise est Windows 98.

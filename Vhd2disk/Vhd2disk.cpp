@@ -30,9 +30,13 @@ public:
 
 	void OnProgress(UINT32 nCurrent, UINT32 nTotal)
 	{
+		WCHAR sText[64] = {0};
+		wsprintf(sText, L"dumping blocks... %u/%u", nCurrent, nTotal);
+		OnStatus(sText);
+
 		HWND hProgress = GetDlgItem(m_hDlg, IDC_PROGRESS_DUMP);
-		SendMessage(hProgress, PBM_SETRANGE32, 0, (LPARAM)nTotal / 100);
-		SendMessage(hProgress, PBM_SETPOS, (LPARAM)nCurrent / 100, 0);
+		SendMessage(hProgress, PBM_SETRANGE32, 0, (LPARAM)nTotal);
+		SendMessage(hProgress, PBM_SETPOS, (LPARAM)nCurrent, 0);
 	}
 
 	void OnDriveWriteError(LPCWSTR sMessage)
