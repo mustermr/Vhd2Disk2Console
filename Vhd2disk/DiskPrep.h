@@ -12,6 +12,9 @@
 // Progress and errors are reported through pProgress.
 BOOL PrepareTargetDisk(LPCWSTR sDrive, LPCWSTR sVhdPath, UINT64 nVhdBytes, IVhdDumpProgress* pProgress);
 
+// Whether the file at sPath is stored on physical disk nDisk.
+BOOL IsFileOnDisk(LPCWSTR sPath, DWORD nDisk);
+
 // Whether the disk is currently offline. FALSE if it can't be queried
 // (no such disk, or not running as administrator).
 BOOL GetDiskOffline(LPCWSTR sDrive, BOOL* pbOffline);

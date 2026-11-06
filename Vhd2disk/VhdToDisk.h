@@ -62,7 +62,7 @@ typedef struct
 typedef struct
 {
 	WCHAR sNumber[8];	// partition number as Linux numbers it (sdaN)
-	WCHAR sKind[12];	// Primary, Extended, Logical or GPT
+	WCHAR sKind[12];	// Primary, Extended, Logical, or GPT
 	WCHAR sBoot[4];
 	WCHAR sType[40];
 	WCHAR sStart[24];	// first LBA
@@ -85,13 +85,13 @@ public:
 	CVhdToDisk(LPWSTR sPath);
 	~CVhdToDisk(void);
 
-	// bPrepareDisk: dismount, clean and offline the target first (see DiskPrep.h)
+	// bPrepareDisk: dismount, clean, and offline the target first (see DiskPrep.h)
 	// nEndState: the disk's online/offline state once done, by default as it was found
 	BOOL DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress
 		, BOOL bPrepareDisk = TRUE, DISK_END_STATE nEndState = DISK_END_AS_FOUND);
 
 
-	// Lists MBR primary, extended and logical partitions, or the GPT entries
+	// Lists MBR primary, extended, and logical partitions, or the GPT entries
 	// when the MBR is protective. *psScheme gets L"MBR", L"GPT" or L"none".
 	BOOL ParsePartitions(VHD_PARTITION_ROW* pRows, int nMaxRows, int* pnRows, LPCWSTR* psScheme);
 

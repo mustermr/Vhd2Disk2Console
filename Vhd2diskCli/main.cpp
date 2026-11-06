@@ -3,6 +3,7 @@
 
 #include "stdafx.h"
 #include <winioctl.h>
+#include <wctype.h>
 #include "../Vhd2disk/VhdDumpProgress.h"
 #include "../Vhd2disk/VhdToDisk.h"
 
@@ -24,6 +25,7 @@
 #define VT_BADGE_OK		L"\x1b[30;102m"
 #define VT_BADGE_WARN	L"\x1b[30;103m"
 #define VT_BADGE_ERROR	L"\x1b[30;101m"
+#define VT_HIGHLIGHT	L"\x1b[30;106m"
 #define VT_CLEAR_EOL	L"\x1b[K"
 
 static BOOL g_bColorOut = FALSE;
@@ -213,15 +215,16 @@ void PrintUsage()
 	}
 
 	PrintSection(L"Usage");
-	wprintf(L"    %s %s<vhd-path> <drive>%s [options]\n", sExeName, Vt(VT_CYAN), Vt(VT_RESET));
+	wprintf(L"    %s %s<vhd-path> [<drive>]%s [options]\n", sExeName, Vt(VT_CYAN), Vt(VT_RESET));
 	wprintf(L"    %s --list\n", sExeName);
 
 	PrintSection(L"Drive");
-	wprintf(L"    N, PhysicalDriveN or \\\\.\\PhysicalDriveN (see --list)\n");
+	wprintf(L"    N, PhysicalDriveN, or \\\\.\\PhysicalDriveN (see --list). Without a drive,\n");
+	wprintf(L"    the disks are listed and you're asked for the number to deploy to.\n");
 
 	PrintSection(L"Options");
 	PrintOption(L"-y, --yes", L"Don't ask for confirmation before writing.");
-	PrintOption(L"--no-prepare", L"Don't dismount, clean or offline the drive first.");
+	PrintOption(L"--no-prepare", L"Don't dismount, clean, or offline the drive first.");
 	PrintOption(L"--online", L"Leave the drive online when done, so its new volumes mount.");
 	PrintOption(L"--offline", L"Leave the drive offline when done.");
 	PrintOption(L"--no-color", L"Plain output (also when NO_COLOR is set or output is redirected).");
@@ -230,7 +233,7 @@ void PrintUsage()
 
 	PrintSection(L"Notes");
 	wprintf(L"    Before writing, the drive's volumes are dismounted, its partition table is\n");
-	wprintf(L"    deleted and it is taken offline, like diskpart CLEAN and OFFLINE DISK.\n");
+	wprintf(L"    deleted, and it is taken offline, like diskpart CLEAN and OFFLINE DISK.\n");
 	wprintf(L"    When done, the drive is put back online or offline as it was found,\n");
 	wprintf(L"    unless --online or --offline says otherwise. These states last until\n");
 	wprintf(L"    reboot. The VHD's partition table is shown before anything is written.\n\n");
@@ -305,35 +308,101 @@ static BOOL GetDriveInfo(LPCWSTR sDrive, WCHAR* sModel, size_t nModelChars, UINT
 	return TRUE;
 }
 
-void ListPhysicalDrives()
+typedef struct
+{
+	int nNumber;
+	UINT64 nBytes;
+	BOOL bKnownState;
+	BOOL bOffline;
+	BOOL bHoldsVhd;
+	WCHAR sModel[128];
+} DRIVE_ROW;
+
+#define MAX_DRIVES 99
+
+// Physical drives 0-98 that can be opened, which takes administrator rights.
+// sVhdPath, if given, marks the drive the VHD is stored on.
+static int FindDrives(DRIVE_ROW* pDrives, int nMaxDrives, LPCWSTR sVhdPath)
 {
 	WCHAR sPhysicalDrive[64] = {0};
-	WCHAR sModel[128] = {0};
-	WCHAR sSize[16] = {0};
-	UINT64 nBytes = 0;
 	int nFound = 0;
 
-	PrintBanner();
-	PrintSection(L"Physical drives");
-
-	for(int i = 0; i < 99; i++)
+	for(int i = 0; i < MAX_DRIVES && nFound < nMaxDrives; i++)
 	{
+		DRIVE_ROW* pDrive = &pDrives[nFound];
+		ZeroMemory(pDrive, sizeof(*pDrive));
+
 		swprintf_s(sPhysicalDrive, L"\\\\.\\PhysicalDrive%d", i);
 
-		if(!GetDriveInfo(sPhysicalDrive, sModel, ARRAYSIZE(sModel), &nBytes))
+		if(!GetDriveInfo(sPhysicalDrive, pDrive->sModel, ARRAYSIZE(pDrive->sModel), &pDrive->nBytes))
 			continue;
 
-		if(nFound == 0)
-			wprintf(L"    %s%-4s %-12s %s%s\n", Vt(VT_HEADER), L"#", L"Size", L"Model", Vt(VT_RESET));
-
-		CVhdToDisk::FormatSize(nBytes, sSize, ARRAYSIZE(sSize));
-		wprintf(L"    %-4d %-12s %s\n", i, sSize, sModel);
+		pDrive->nNumber = i;
+		pDrive->bKnownState = GetDiskOffline(sPhysicalDrive, &pDrive->bOffline);
+		pDrive->bHoldsVhd = sVhdPath && IsFileOnDisk(sVhdPath, i);
 		nFound++;
 	}
 
-	if(nFound == 0)
-		wprintf(L"    No physical drives could be opened (run as administrator).\n");
+	return nFound;
+}
 
+static const DRIVE_ROW* FindDriveRow(const DRIVE_ROW* pDrives, int nDrives, int nNumber)
+{
+	for(int i = 0; i < nDrives; i++)
+	{
+		if(pDrives[i].nNumber == nNumber)
+			return &pDrives[i];
+	}
+
+	return NULL;
+}
+
+// nTarget: number of the drive to mark as the deploy target, or -1 for none
+static void PrintDriveTable(const DRIVE_ROW* pDrives, int nDrives, int nTarget)
+{
+	WCHAR sSize[16] = {0};
+
+	if(nDrives == 0)
+	{
+		wprintf(L"    No physical drives could be opened (run as administrator).\n");
+		return;
+	}
+
+	wprintf(L"    %s%-4s %-11s %-9s %-30s%s\n", Vt(VT_HEADER), L"#", L"Size", L"State", L"Model", Vt(VT_RESET));
+
+	for(int i = 0; i < nDrives; i++)
+	{
+		const DRIVE_ROW* pDrive = &pDrives[i];
+		BOOL bTarget = (pDrive->nNumber == nTarget);
+		LPCWSTR sState = !pDrive->bKnownState ? L"?" : pDrive->bOffline ? L"offline" : L"online";
+
+		CVhdToDisk::FormatSize(pDrive->nBytes, sSize, ARRAYSIZE(sSize));
+
+		// The target is marked with ">" so it stands out without color too
+		wprintf(L"  %s %s%-4d %-11s %-9s %-30.30s%s"
+			, bTarget ? L">" : L" "
+			, bTarget ? Vt(VT_HIGHLIGHT) : L""
+			, pDrive->nNumber, sSize, sState, pDrive->sModel
+			, bTarget ? Vt(VT_RESET) : L"");
+
+		if(bTarget)
+			wprintf(L" %starget%s", Vt(VT_BOLD), Vt(VT_RESET));
+
+		if(pDrive->bHoldsVhd)
+			wprintf(L" %sholds the VHD%s", Vt(VT_DIM), Vt(VT_RESET));
+
+		wprintf(L"\n");
+	}
+}
+
+void ListPhysicalDrives()
+{
+	static DRIVE_ROW drives[MAX_DRIVES];
+	int nDrives = FindDrives(drives, ARRAYSIZE(drives), NULL);
+
+	PrintBanner();
+	PrintSection(L"Physical drives");
+	PrintDriveTable(drives, nDrives, -1);
 	wprintf(L"\n");
 }
 
@@ -352,10 +421,68 @@ BOOL NormalizeDrivePath(LPCWSTR sArg, WCHAR* sDrive, size_t nDriveChars)
 
 	if(bAllDigits)
 		swprintf_s(sDrive, nDriveChars, L"\\\\.\\PhysicalDrive%s", sArg);
+	else if(_wcsnicmp(sArg, L"PhysicalDrive", 13) == 0)
+		swprintf_s(sDrive, nDriveChars, L"\\\\.\\%s", sArg);
 	else
 		wcscpy_s(sDrive, nDriveChars, sArg);
 
 	return TRUE;
+}
+
+// N for \\.\PhysicalDriveN, -1 for anything else (such as a file)
+static int DriveNumberFromPath(LPCWSTR sDrive)
+{
+	static const WCHAR sPrefix[] = L"\\\\.\\PhysicalDrive";
+	const size_t nPrefix = ARRAYSIZE(sPrefix) - 1;
+
+	if(_wcsnicmp(sDrive, sPrefix, nPrefix) != 0 || sDrive[nPrefix] == L'\0')
+		return -1;
+
+	for(LPCWSTR p = sDrive + nPrefix; *p; p++)
+	{
+		if(*p < L'0' || *p > L'9')
+			return -1;
+	}
+
+	return _wtoi(sDrive + nPrefix);
+}
+
+// Asks for the target disk number until one from the list is typed.
+// FALSE if the user cancels with an empty line.
+static BOOL PromptForDrive(const DRIVE_ROW* pDrives, int nDrives, int* pnDrive)
+{
+	WCHAR sLine[64];
+
+	for(;;)
+	{
+		wprintf(L"\n  %sDisk number to deploy to (Enter to cancel):%s ", Vt(VT_YELLOW), Vt(VT_RESET));
+		fflush(stdout);
+
+		ZeroMemory(sLine, sizeof(sLine));
+		if(!fgetws(sLine, ARRAYSIZE(sLine), stdin)) return FALSE;
+
+		WCHAR* p = sLine;
+		while(iswspace(*p)) p++;
+
+		size_t nLen = wcslen(p);
+		while(nLen > 0 && iswspace(p[nLen - 1])) p[--nLen] = L'\0';
+
+		if(nLen == 0) return FALSE;
+
+		WCHAR* pEnd = NULL;
+		long nNumber = wcstol(p, &pEnd, 10);
+		const DRIVE_ROW* pDrive = (*pEnd == L'\0') ? FindDriveRow(pDrives, nDrives, (int)nNumber) : NULL;
+
+		if(!pDrive)
+			wprintf(L"    %s\"%s\" is not a disk number from the list.%s\n", Vt(VT_YELLOW), p, Vt(VT_RESET));
+		else if(pDrive->bHoldsVhd)
+			wprintf(L"    %sDisk %d holds the VHD, so it can't be the target.%s\n", Vt(VT_YELLOW), pDrive->nNumber, Vt(VT_RESET));
+		else
+		{
+			*pnDrive = pDrive->nNumber;
+			return TRUE;
+		}
+	}
 }
 
 BOOL PrintVhdInfo(CVhdToDisk& vhd, LPCWSTR sVhdPath)
@@ -398,30 +525,51 @@ BOOL PrintVhdInfo(CVhdToDisk& vhd, LPCWSTR sVhdPath)
 	return TRUE;
 }
 
-void PrintTarget(LPCWSTR sDrive, BOOL bPrepareDisk, DISK_END_STATE nEndState)
+void PrintTarget(LPCWSTR sDrive, BOOL bPrepareDisk, DISK_END_STATE nEndState
+	, const DRIVE_ROW* pDrives, int nDrives)
 {
+	const DRIVE_ROW* pTarget = FindDriveRow(pDrives, nDrives, DriveNumberFromPath(sDrive));
 	BOOL bOffline = FALSE;
-	BOOL bKnownState = GetDiskOffline(sDrive, &bOffline);
-	WCHAR sModel[128] = {0};
-	WCHAR sSize[16] = {0};
-	WCHAR sValue[192] = {0};
-	UINT64 nBytes = 0;
+	BOOL bKnownState = FALSE;
 
 	PrintSection(L"Target");
-	PrintField(L"Drive", sDrive);
 
-	if(GetDriveInfo(sDrive, sModel, ARRAYSIZE(sModel), &nBytes) && (nBytes || sModel[0]))
+	if(nDrives > 0)
 	{
-		CVhdToDisk::FormatSize(nBytes, sSize, ARRAYSIZE(sSize));
-		swprintf_s(sValue, L"%s%s%s", sSize, sModel[0] ? L", " : L"", sModel);
-		PrintField(L"Disk", sValue);
+		PrintDriveTable(pDrives, nDrives, pTarget ? pTarget->nNumber : -1);
+		wprintf(L"\n");
 	}
 
-	if(bKnownState)
-		PrintField(L"State", bOffline ? L"offline" : L"online");
+	PrintField(L"Drive", sDrive);
+
+	if(pTarget)
+	{
+		bKnownState = pTarget->bKnownState;
+		bOffline = pTarget->bOffline;
+	}
+	else
+	{
+		// Not in the table (not running as administrator, or not a disk): describe it here
+		WCHAR sModel[128] = {0};
+		WCHAR sSize[16] = {0};
+		WCHAR sValue[192] = {0};
+		UINT64 nBytes = 0;
+
+		if(GetDriveInfo(sDrive, sModel, ARRAYSIZE(sModel), &nBytes) && (nBytes || sModel[0]))
+		{
+			CVhdToDisk::FormatSize(nBytes, sSize, ARRAYSIZE(sSize));
+			swprintf_s(sValue, L"%s%s%s", sSize, sModel[0] ? L", " : L"", sModel);
+			PrintField(L"Disk", sValue);
+		}
+
+		bKnownState = GetDiskOffline(sDrive, &bOffline);
+
+		if(bKnownState)
+			PrintField(L"State", bOffline ? L"offline" : L"online");
+	}
 
 	PrintField(L"Prepare", bPrepareDisk
-		? L"dismount, clean and take offline before writing"
+		? L"dismount, clean, and take offline before writing"
 		: L"no (--no-prepare), write to the drive as it is");
 
 	if(nEndState == DISK_END_ONLINE)
@@ -508,14 +656,19 @@ int wmain(int argc, wchar_t* argv[])
 		return 0;
 	}
 
-	if(!sVhdPath || !sDriveArg)
+	if(!sVhdPath)
 	{
 		PrintUsage();
 		return 1;
 	}
 
-	WCHAR sDrive[MAX_PATH] = {0};
-	NormalizeDrivePath(sDriveArg, sDrive, ARRAYSIZE(sDrive));
+	// Scripts use --yes; asking for the disk would leave them waiting
+	if(!sDriveArg && bAssumeYes)
+	{
+		PrintError(L"--yes needs a drive. Without one, the disk number is asked for.");
+		wprintf(L"\n");
+		return 1;
+	}
 
 	CVhdToDisk vhd(const_cast<LPWSTR>(sVhdPath));
 
@@ -528,7 +681,59 @@ int wmain(int argc, wchar_t* argv[])
 		return 1;
 	}
 
-	PrintTarget(sDrive, bPrepareDisk, nEndState);
+	static DRIVE_ROW drives[MAX_DRIVES];
+	int nDrives = FindDrives(drives, ARRAYSIZE(drives), sVhdPath);
+	WCHAR sDrive[MAX_PATH] = {0};
+
+	if(sDriveArg)
+	{
+		NormalizeDrivePath(sDriveArg, sDrive, ARRAYSIZE(sDrive));
+
+		// Only checkable when the disks could be listed (as administrator)
+		int nTarget = DriveNumberFromPath(sDrive);
+		const DRIVE_ROW* pTarget = FindDriveRow(drives, nDrives, nTarget);
+		WCHAR sMessage[128] = {0};
+
+		if(nDrives > 0 && nTarget >= 0 && !pTarget)
+		{
+			swprintf_s(sMessage, L"There is no disk %d. Run with --list to see the disks.", nTarget);
+			PrintError(sMessage);
+			wprintf(L"\n");
+			return 1;
+		}
+
+		if(pTarget && pTarget->bHoldsVhd)
+		{
+			swprintf_s(sMessage, L"Disk %d holds the VHD, so it can't be the target.", nTarget);
+			PrintError(sMessage);
+			wprintf(L"\n");
+			return 1;
+		}
+	}
+	else
+	{
+		int nChosen = -1;
+
+		PrintSection(L"Disks");
+		PrintDriveTable(drives, nDrives, -1);
+
+		if(nDrives == 0)
+		{
+			PrintError(L"No disks to deploy to. Run as administrator, or give the drive.");
+			wprintf(L"\n");
+			return 1;
+		}
+
+		if(!PromptForDrive(drives, nDrives, &nChosen))
+		{
+			wprintf(L"\n  Aborted. Nothing was written.\n\n");
+			return 1;
+		}
+
+		swprintf_s(sDrive, L"\\\\.\\PhysicalDrive%d", nChosen);
+	}
+
+	PrintTarget(sDrive, bPrepareDisk, nEndState, drives, nDrives);
 
 	if(!bAssumeYes)
 	{

@@ -79,7 +79,7 @@ static BOOL IsVolumeOnDisk(HANDLE hVolume, DWORD nDisk)
 	return FALSE;
 }
 
-static BOOL IsFileOnDisk(LPCWSTR sPath, DWORD nDisk)
+BOOL IsFileOnDisk(LPCWSTR sPath, DWORD nDisk)
 {
 	WCHAR sMountPoint[MAX_PATH] = {0};
 	WCHAR sVolume[MAX_PATH] = {0};
