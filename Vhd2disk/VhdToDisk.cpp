@@ -495,7 +495,6 @@ BOOL CVhdToDisk::Dump(IVhdDumpProgress* pProgress)
 		goto clean;
 	}
 
-	pProgress->OnStatus(L"Start dumping...");
 	pProgress->OnProgress(0, bats);
 
 	for(UINT32 b = 0; b < bats; b++)
