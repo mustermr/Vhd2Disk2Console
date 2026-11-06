@@ -191,6 +191,13 @@
     <ClInclude Include="..\Vhd2disk\DiskPrep.h" />
     <ClInclude Include="..\Vhd2disk\Trace.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Vhd2diskCli.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="v2dcli.ico" />
+    <None Include="make-cli-icon.ps1" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

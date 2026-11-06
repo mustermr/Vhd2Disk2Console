@@ -1,0 +1,5 @@
+// Vhd2diskCli.rc: the CLI's icon, the GUI icon with a terminal badge (see make-cli-icon.ps1).
+//
+
+// The lowest icon ID is the one Explorer shows for the exe
+1 ICON "v2dcli.ico"
