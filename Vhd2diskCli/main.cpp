@@ -19,9 +19,11 @@
 #define VT_CYAN			L"\x1b[96m"
 #define VT_TITLE		L"\x1b[1;96m"
 #define VT_HEADER		L"\x1b[1;36m"
-#define VT_BADGE_OK		L"\x1b[1;97;42m"
-#define VT_BADGE_WARN	L"\x1b[1;97;43m"
-#define VT_BADGE_ERROR	L"\x1b[1;97;41m"
+// Black on bright backgrounds: conhost has no bold weight (1 only brightens
+// the color, turning black grey), so contrast is what makes badges stand out
+#define VT_BADGE_OK		L"\x1b[30;102m"
+#define VT_BADGE_WARN	L"\x1b[30;103m"
+#define VT_BADGE_ERROR	L"\x1b[30;101m"
 #define VT_CLEAR_EOL	L"\x1b[K"
 
 static BOOL g_bColorOut = FALSE;
