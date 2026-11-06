@@ -598,9 +598,13 @@ clean:
 	return bReturn;
 }
 
-BOOL CVhdToDisk::DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress, BOOL bPrepareDisk)
+BOOL CVhdToDisk::DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress
+	, BOOL bPrepareDisk, DISK_END_STATE nEndState)
 {
 	BOOL bReturn = FALSE;
+	BOOL bReachedDisk = FALSE;
+	BOOL bWasOffline = FALSE;
+	BOOL bKnownState = FALSE;
 
 	if(m_hVhdFile == NULL)
 	{
@@ -625,6 +629,10 @@ BOOL CVhdToDisk::DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDump
 		TRACE("Failed to read dynamic header\n");
 		goto clean;
 	}
+
+	// Remember the state the disk was found in, before anything changes it
+	bKnownState = GetDiskOffline(sDrive, &bWasOffline);
+	bReachedDisk = TRUE;
 
 	if(bPrepareDisk)
 	{
@@ -656,6 +664,18 @@ clean:
 
 	CloseVhdFile();
 	ClosePhysicalDrive();
+
+	// Done after the write handle is closed. A failure here is reported but
+	// doesn't change the result: the image itself was written or not.
+	if(bReachedDisk)
+	{
+		if(nEndState == DISK_END_ONLINE)
+			SetDiskOffline(sDrive, FALSE, pProgress);
+		else if(nEndState == DISK_END_OFFLINE)
+			SetDiskOffline(sDrive, TRUE, pProgress);
+		else if(bKnownState)
+			SetDiskOffline(sDrive, bWasOffline, pProgress);
+	}
 
 exit:
 	return bReturn;

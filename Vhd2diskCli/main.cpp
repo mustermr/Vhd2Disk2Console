@@ -81,7 +81,7 @@ static void PrintSection(LPCWSTR sTitle)
 
 static void PrintField(LPCWSTR sLabel, LPCWSTR sValue)
 {
-	wprintf(L"    %s%-8s%s %s\n", Vt(VT_DIM), sLabel, Vt(VT_RESET), sValue);
+	wprintf(L"    %s%-10s%s %s\n", Vt(VT_DIM), sLabel, Vt(VT_RESET), sValue);
 }
 
 // A colored label such as " ERROR " followed by the message; continuation
@@ -117,12 +117,13 @@ static void PrintError(LPCWSTR sMessage)
 class CConsoleProgress : public IVhdDumpProgress
 {
 	BOOL m_bProgressLine;
+	BOOL m_bFinishing;
 	ULONGLONG m_nStart;
 	ULONGLONG m_nLastDraw;
 	UINT32 m_nLastCurrent;
 
 public:
-	CConsoleProgress() : m_bProgressLine(FALSE), m_nStart(0), m_nLastDraw(0), m_nLastCurrent(0) {}
+	CConsoleProgress() : m_bProgressLine(FALSE), m_bFinishing(FALSE), m_nStart(0), m_nLastDraw(0), m_nLastCurrent(0) {}
 
 	void EndProgressLine()
 	{
@@ -135,6 +136,14 @@ public:
 	void OnStatus(LPCWSTR sStatus)
 	{
 		EndProgressLine();
+
+		// After writing, the only status is setting the disk's online/offline state
+		if(m_nStart != 0 && !m_bFinishing)
+		{
+			m_bFinishing = TRUE;
+			PrintSection(L"Finishing");
+		}
+
 		wprintf(L"    %s%s%s\n", Vt(VT_DIM), sStatus, Vt(VT_RESET));
 	}
 
@@ -213,14 +222,18 @@ void PrintUsage()
 	PrintSection(L"Options");
 	PrintOption(L"-y, --yes", L"Don't ask for confirmation before writing.");
 	PrintOption(L"--no-prepare", L"Don't dismount, clean or offline the drive first.");
+	PrintOption(L"--online", L"Leave the drive online when done, so its new volumes mount.");
+	PrintOption(L"--offline", L"Leave the drive offline when done.");
 	PrintOption(L"--no-color", L"Plain output (also when NO_COLOR is set or output is redirected).");
 	PrintOption(L"-l, --list", L"List physical drives with their size and model.");
 	PrintOption(L"-h, --help", L"Show this help.");
 
 	PrintSection(L"Notes");
 	wprintf(L"    Before writing, the drive's volumes are dismounted, its partition table is\n");
-	wprintf(L"    deleted and it is taken offline until reboot, like diskpart CLEAN and\n");
-	wprintf(L"    OFFLINE DISK. The VHD's partition table is shown before anything is written.\n\n");
+	wprintf(L"    deleted and it is taken offline, like diskpart CLEAN and OFFLINE DISK.\n");
+	wprintf(L"    When done, the drive is put back online or offline as it was found,\n");
+	wprintf(L"    unless --online or --offline says otherwise. These states last until\n");
+	wprintf(L"    reboot. The VHD's partition table is shown before anything is written.\n\n");
 }
 
 // Appends a space-padded ANSI string from a storage descriptor, trimmed
@@ -385,8 +398,10 @@ BOOL PrintVhdInfo(CVhdToDisk& vhd, LPCWSTR sVhdPath)
 	return TRUE;
 }
 
-void PrintTarget(LPCWSTR sDrive, BOOL bPrepareDisk)
+void PrintTarget(LPCWSTR sDrive, BOOL bPrepareDisk, DISK_END_STATE nEndState)
 {
+	BOOL bOffline = FALSE;
+	BOOL bKnownState = GetDiskOffline(sDrive, &bOffline);
 	WCHAR sModel[128] = {0};
 	WCHAR sSize[16] = {0};
 	WCHAR sValue[192] = {0};
@@ -402,9 +417,21 @@ void PrintTarget(LPCWSTR sDrive, BOOL bPrepareDisk)
 		PrintField(L"Disk", sValue);
 	}
 
+	if(bKnownState)
+		PrintField(L"State", bOffline ? L"offline" : L"online");
+
 	PrintField(L"Prepare", bPrepareDisk
 		? L"dismount, clean and take offline before writing"
 		: L"no (--no-prepare), write to the drive as it is");
+
+	if(nEndState == DISK_END_ONLINE)
+		PrintField(L"When done", L"online (--online)");
+	else if(nEndState == DISK_END_OFFLINE)
+		PrintField(L"When done", L"offline (--offline)");
+	else if(bKnownState)
+		PrintField(L"When done", bOffline ? L"offline, as found" : L"back online, as found");
+	else
+		PrintField(L"When done", L"as found");
 }
 
 int wmain(int argc, wchar_t* argv[])
@@ -414,6 +441,8 @@ int wmain(int argc, wchar_t* argv[])
 	BOOL bColor = TRUE;
 	BOOL bList = FALSE;
 	BOOL bHelp = FALSE;
+	DISK_END_STATE nEndState = DISK_END_AS_FOUND;
+	int nEndStateArgs = 0;
 	LPCWSTR sVhdPath = NULL;
 	LPCWSTR sDriveArg = NULL;
 	LPCWSTR sUnknown = NULL;
@@ -426,6 +455,16 @@ int wmain(int argc, wchar_t* argv[])
 			bAssumeYes = TRUE;
 		else if(wcscmp(argv[i], L"--no-prepare") == 0)
 			bPrepareDisk = FALSE;
+		else if(wcscmp(argv[i], L"--online") == 0)
+		{
+			nEndState = DISK_END_ONLINE;
+			nEndStateArgs++;
+		}
+		else if(wcscmp(argv[i], L"--offline") == 0)
+		{
+			nEndState = DISK_END_OFFLINE;
+			nEndStateArgs++;
+		}
 		else if(wcscmp(argv[i], L"--no-color") == 0)
 			bColor = FALSE;
 		else if(wcscmp(argv[i], L"-h") == 0 || wcscmp(argv[i], L"--help") == 0
@@ -456,6 +495,13 @@ int wmain(int argc, wchar_t* argv[])
 		return 1;
 	}
 
+	if(nEndStateArgs > 1)
+	{
+		PrintError(L"Use only one of --online and --offline.");
+		wprintf(L"\n");
+		return 1;
+	}
+
 	if(bList)
 	{
 		ListPhysicalDrives();
@@ -482,7 +528,7 @@ int wmain(int argc, wchar_t* argv[])
 		return 1;
 	}
 
-	PrintTarget(sDrive, bPrepareDisk);
+	PrintTarget(sDrive, bPrepareDisk, nEndState);
 
 	if(!bAssumeYes)
 	{
@@ -505,7 +551,7 @@ int wmain(int argc, wchar_t* argv[])
 		PrintSection(L"Preparing disk");
 
 	CConsoleProgress progress;
-	BOOL bResult = vhd.DumpVhdToDisk(const_cast<LPWSTR>(sVhdPath), sDrive, &progress, bPrepareDisk);
+	BOOL bResult = vhd.DumpVhdToDisk(const_cast<LPWSTR>(sVhdPath), sDrive, &progress, bPrepareDisk, nEndState);
 
 	progress.EndProgressLine();
 	wprintf(L"\n");

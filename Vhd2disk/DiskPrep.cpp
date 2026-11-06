@@ -100,6 +100,134 @@ static BOOL IsFileOnDisk(LPCWSTR sPath, DWORD nDisk)
 	return bReturn;
 }
 
+static HANDLE OpenDisk(LPCWSTR sDrive)
+{
+	return CreateFile(sDrive
+		, GENERIC_READ | GENERIC_WRITE
+		, FILE_SHARE_READ | FILE_SHARE_WRITE
+		, NULL
+		, OPEN_EXISTING
+		, 0
+		, NULL);
+}
+
+// Sets or clears the offline attribute, clearing the attributes in
+// dwClearMask at the same time. Not persisted: a reboot restores the
+// disk's normal state. Leaves GetLastError set on failure.
+static BOOL SetOfflineAttribute(HANDLE hDisk, BOOL bOffline, DWORDLONG dwClearMask)
+{
+	SET_DISK_ATTRIBUTES setAttributes;
+	DWORD dwBytes = 0;
+
+	ZeroMemory(&setAttributes, sizeof(setAttributes));
+	setAttributes.Version = sizeof(setAttributes);
+	setAttributes.Persist = FALSE;
+	setAttributes.Attributes = bOffline ? DISK_ATTRIBUTE_OFFLINE : 0;
+	setAttributes.AttributesMask = DISK_ATTRIBUTE_OFFLINE | dwClearMask;
+
+	// Right after a clean or a dump the disk can still be busy (the reason the
+	// diskpart scripts offline in a separate run), so retry for a few seconds
+	for(int nTry = 1; ; nTry++)
+	{
+		if(DeviceIoControl(hDisk, IOCTL_DISK_SET_DISK_ATTRIBUTES
+			, &setAttributes, sizeof(setAttributes), NULL, 0, &dwBytes, NULL))
+			return TRUE;
+
+		if(nTry == 10)
+			return FALSE;
+
+		Sleep(500);
+	}
+}
+
+static BOOL QueryDisk(HANDLE hDisk, DWORD* pnDisk, BOOL* pbOffline)
+{
+	STORAGE_DEVICE_NUMBER deviceNumber;
+	GET_DISK_ATTRIBUTES attributes;
+	DWORD dwBytes = 0;
+
+	if(!DeviceIoControl(hDisk, IOCTL_STORAGE_GET_DEVICE_NUMBER
+		, NULL, 0, &deviceNumber, sizeof(deviceNumber), &dwBytes, NULL))
+		return FALSE;
+
+	ZeroMemory(&attributes, sizeof(attributes));
+	if(!DeviceIoControl(hDisk, IOCTL_DISK_GET_DISK_ATTRIBUTES
+		, NULL, 0, &attributes, sizeof(attributes), &dwBytes, NULL))
+		return FALSE;
+
+	*pnDisk = deviceNumber.DeviceNumber;
+	*pbOffline = (attributes.Attributes & DISK_ATTRIBUTE_OFFLINE) != 0;
+
+	return TRUE;
+}
+
+BOOL GetDiskOffline(LPCWSTR sDrive, BOOL* pbOffline)
+{
+	DWORD nDisk = 0;
+	HANDLE hDisk = OpenDisk(sDrive);
+
+	if(hDisk == INVALID_HANDLE_VALUE) return FALSE;
+
+	BOOL bReturn = QueryDisk(hDisk, &nDisk, pbOffline);
+
+	CloseHandle(hDisk);
+
+	return bReturn;
+}
+
+BOOL SetDiskOffline(LPCWSTR sDrive, BOOL bOffline, IVhdDumpProgress* pProgress)
+{
+	BOOL bReturn = FALSE;
+	BOOL bIsOffline = FALSE;
+	DWORD nDisk = 0;
+	DWORD dwBytes = 0;
+	WCHAR sStatus[128] = {0};
+	LPCWSTR sState = bOffline ? L"offline" : L"online";
+
+	HANDLE hDisk = OpenDisk(sDrive);
+
+	if(hDisk == INVALID_HANDLE_VALUE)
+		return Fail(pProgress, GetLastError(), L"Can't open %s to set it %s.", sDrive, sState);
+
+	if(!QueryDisk(hDisk, &nDisk, &bIsOffline))
+	{
+		Fail(pProgress, GetLastError(), L"Can't read the state of %s.", sDrive);
+		goto clean;
+	}
+
+	if(bIsOffline == bOffline)
+	{
+		swprintf_s(sStatus, L"Disk %u is %s.", nDisk, sState);
+		pProgress->OnStatus(sStatus);
+		bReturn = TRUE;
+		goto clean;
+	}
+
+	swprintf_s(sStatus, bOffline ? L"Taking disk %u offline..." : L"Bringing disk %u online...", nDisk);
+	pProgress->OnStatus(sStatus);
+
+	if(!SetOfflineAttribute(hDisk, bOffline, 0))
+	{
+		Fail(pProgress, GetLastError(), L"Can't set disk %u %s.", nDisk, sState);
+		goto clean;
+	}
+
+	// Have Windows read the newly written partition table so its volumes mount
+	if(!bOffline)
+		DeviceIoControl(hDisk, IOCTL_DISK_UPDATE_PROPERTIES, NULL, 0, NULL, 0, &dwBytes, NULL);
+
+	swprintf_s(sStatus, L"Disk %u is %s.", nDisk, sState);
+	pProgress->OnStatus(sStatus);
+
+	bReturn = TRUE;
+
+clean:
+
+	CloseHandle(hDisk);
+
+	return bReturn;
+}
+
 BOOL PrepareTargetDisk(LPCWSTR sDrive, LPCWSTR sVhdPath, UINT64 nVhdBytes, IVhdDumpProgress* pProgress)
 {
 	BOOL bReturn = FALSE;
@@ -118,7 +246,6 @@ BOOL PrepareTargetDisk(LPCWSTR sDrive, LPCWSTR sVhdPath, UINT64 nVhdBytes, IVhdD
 	STORAGE_DEVICE_NUMBER deviceNumber;
 	GET_LENGTH_INFORMATION length;
 	GET_DISK_ATTRIBUTES attributes;
-	SET_DISK_ATTRIBUTES setAttributes;
 
 	hDisk = CreateFile(sDrive
 		, GENERIC_READ | GENERIC_WRITE
@@ -258,27 +385,10 @@ BOOL PrepareTargetDisk(LPCWSTR sDrive, LPCWSTR sVhdPath, UINT64 nVhdBytes, IVhdD
 		swprintf_s(sStatus, L"Taking disk %u offline...", nDisk);
 		pProgress->OnStatus(sStatus);
 
-		ZeroMemory(&setAttributes, sizeof(setAttributes));
-		setAttributes.Version = sizeof(setAttributes);
-		setAttributes.Persist = FALSE;	// back online after a reboot
-		setAttributes.Attributes = DISK_ATTRIBUTE_OFFLINE;
-		setAttributes.AttributesMask = DISK_ATTRIBUTE_OFFLINE | DISK_ATTRIBUTE_READ_ONLY;
-
-		// Right after a clean the disk can still be busy (the reason the diskpart
-		// scripts offline in a separate run), so retry for a few seconds
-		for(int nTry = 1; ; nTry++)
+		if(!SetOfflineAttribute(hDisk, TRUE, DISK_ATTRIBUTE_READ_ONLY))
 		{
-			if(DeviceIoControl(hDisk, IOCTL_DISK_SET_DISK_ATTRIBUTES
-				, &setAttributes, sizeof(setAttributes), NULL, 0, &dwBytes, NULL))
-				break;
-
-			if(nTry == 10)
-			{
-				Fail(pProgress, GetLastError(), L"Can't take disk %u offline.", nDisk);
-				goto clean;
-			}
-
-			Sleep(500);
+			Fail(pProgress, GetLastError(), L"Can't take disk %u offline.", nDisk);
+			goto clean;
 		}
 	}
 

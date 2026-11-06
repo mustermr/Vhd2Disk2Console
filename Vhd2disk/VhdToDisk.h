@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VhdDumpProgress.h"
+#include "DiskPrep.h"
 
 typedef struct
 {
@@ -85,7 +86,9 @@ public:
 	~CVhdToDisk(void);
 
 	// bPrepareDisk: dismount, clean and offline the target first (see DiskPrep.h)
-	BOOL DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress, BOOL bPrepareDisk = TRUE);
+	// nEndState: the disk's online/offline state once done, by default as it was found
+	BOOL DumpVhdToDisk(const LPWSTR sPath, const LPWSTR sDrive, IVhdDumpProgress* pProgress
+		, BOOL bPrepareDisk = TRUE, DISK_END_STATE nEndState = DISK_END_AS_FOUND);
 
 
 	// Lists MBR primary, extended and logical partitions, or the GPT entries
