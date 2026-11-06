@@ -193,9 +193,19 @@ void PrintUsage()
 {
 	PrintBanner();
 
+	// Show the name this exe actually has, e.g. Vhd2diskCli_x64.exe
+	WCHAR sExePath[MAX_PATH] = {0};
+	LPCWSTR sExeName = L"Vhd2diskCli.exe";
+
+	if(GetModuleFileNameW(NULL, sExePath, ARRAYSIZE(sExePath)))
+	{
+		LPCWSTR sSlash = wcsrchr(sExePath, L'\\');
+		sExeName = sSlash ? sSlash + 1 : sExePath;
+	}
+
 	PrintSection(L"Usage");
-	wprintf(L"    Vhd2diskCli.exe %s<vhd-path> <drive>%s [options]\n", Vt(VT_CYAN), Vt(VT_RESET));
-	wprintf(L"    Vhd2diskCli.exe --list\n");
+	wprintf(L"    %s %s<vhd-path> <drive>%s [options]\n", sExeName, Vt(VT_CYAN), Vt(VT_RESET));
+	wprintf(L"    %s --list\n", sExeName);
 
 	PrintSection(L"Drive");
 	wprintf(L"    N, PhysicalDriveN or \\\\.\\PhysicalDriveN (see --list)\n");

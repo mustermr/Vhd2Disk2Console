@@ -61,7 +61,14 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <!-- Architecture suffix for output names: Name_x64.exe, Name_x86.exe, Name_arm64.exe -->
+    <ArchSuffix>$(Platform.ToLower())</ArchSuffix>
+    <ArchSuffix Condition="'$(Platform)'=='Win32'">x86</ArchSuffix>
+  </PropertyGroup>
+  <PropertyGroup>
+    <TargetName>$(ProjectName)_$(ArchSuffix)</TargetName>
+  </PropertyGroup>
   <PropertyGroup>
     <_ProjectFileVersion>10.0.40219.1</_ProjectFileVersion>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
